@@ -1,0 +1,77 @@
+# harness/navhmini — NavHarness (core/harnesses/navharness.py; package core/harnesses/navh/) with mini-swe-agent
+# as the reasoning core (transport mini-session). The one difference from harness/navh.yaml (which describes what
+# the orchestrator does): Claude Code and Codex each hold a conversation and run the tool loop inside it, while
+# mini's loop is a Python loop in OUR process. Everything else is identical — the same MCP bridge, the same
+# workspace, the same five session kinds, gates and ladder, the same turn budgets. The memory is reached through
+# the bridge's list_files / read_file / write_file, so a local model reads the notes through the same door and the
+# same fence as the two CLIs. litellm bills through the provider key; see core/harnesses/navh/session/wire/mini.py.
+# This folder is the experiment's Hydra harness group: a file beside it picks one with `harness=<name>`
+# (defaults: - harness: ???). root = the run-name segment, output_dir = outputs/<dir>; every other key is a
+# constructor kwarg of the adapter (harness.<key>=… overrides one from the command line).
+_target_: core.harnesses.navharness.NavHarnessAdapter
+root: navhmini
+output_dir: navharness
+transport: mini-session    # mini-swe-agent is the core; the loop is OURS, the tools are the bridge's
+# the judge (HarnessConfig names)
+persist_map: true         # false = episodic: SLAM / map / markers rebuilt at every task boundary (env reset_spatial)
+precheck: model           # none | model — the pre-stop verification (the judge's gate before the STOP)
+certify: model            # none | model — the post-stop certification (what the ledger says)
+# the agent's session
+compact: boundary         # boundary (one session per task) | token / never (the session carries over the task
+                          #   boundary and compacts as the CLI compacts)
+chunk_turns: 25           # agentic turns one hop may take before the orchestrator reads the state file
+stop_views: 4             # forced look-around at the stop position (judge evidence), taken on a close request
+max_turns_per_task: 200   # model turns per task (all its hops and attempts)
+step_budget_per_task: 500 # executed actions per task (all its attempts); the task closes when spent
+# the ladder
+reset_after_turns: 80     # the fallback rung: turns on ONE attempt before the harness acts unasked
+max_resets_per_task: 1    # recoveries allowed per task (0 = the ladder is offered and never fires)
+recovery: true            # the scope ladder (continue < attempt < place < room < floor < house);
+                          #   false = no recovery at all, the fallback included (the task keeps its budget)
+recovery_ceiling: house
+recovery_min_turns: 12
+recovery_escalation: true # a repeat recovery at or below the last scope goes one rung up (inert at 1 per task)
+recovery_handover: structured  # what the next attempt reads: structured (the six-field note) | empty (none) |
+                               #   other (another task's note) | summary (prose, cut to the bank's mean length)
+recovery_handover_bank: ""     # an earlier structured run's output dir (or a lessons.jsonl): the notes `other`
+                               #   lends and the length `summary` matches; required for summary
+# the memory tiers
+place_graph: true
+archive_policy: false     # what a closed task leaves behind for the next one (code-written)
+notes: true               # the house notes (MEMORY.md, house.md, rooms/, skills/), consolidated at run end
+# checkpoints / resume / replay
+checkpoints: false        # freeze map + markers + body + cursor at every task boundary, under <run_dir>/navh_<i>/checkpoints/
+resume_from: ""           # a previous run dir for this chain: replay its ledger and skip the tasks it closed
+replay_from: ""           # a run dir holding checkpoints/ (a run made with checkpoints: true)
+replay_task: -1           # which task to seat at and re-run from its frozen boundary (-1 = off)
+map_state: ""             # a file the map + markers are kept in across runs ("{house}" = the scene)
+# long-term memory across runs (a deployment; scripts/deploy.py sets these)
+memory_root: ""           # "" = this chain's own directory: every benchmark episode starts with empty notes
+day: ""                   # the journal's day (ISO date; "" = today)
+chain_ids: []             # a deployment day: episodes of ONE house as one chain ([] = the placed episode)
+# the model side: who holds the two completion checks (both of them; the wake-up and the consolidation stay
+# the seat's). null / "" = the seat's own model on the seat's own core. The cross-model judging comparison swaps
+# them, naming the id the judge's core takes (models/models.yaml, that core's column):
+#   Qwen3.8-27B navigator, Opus 5 judge:  harness=navhmini model=qwen3.8-27b
+#                                         harness.judge_model=claude-opus-5 harness.judge_transport=sdk-session
+#   Opus 5 navigator, Qwen3.8-27B judge:  harness=navh model=opus-5
+#                                         harness.judge_model=ollama_chat/qwen3.8-27b-q4-std harness.judge_transport=mini-session
+judge_model: null         # null = the seat's own model judges too
+judge_transport: ""       # "" = the seat's core | sdk-session (Claude Code) | codex-session (Codex CLI) |
+                          #   mini-session (mini-swe-agent: any litellm id, ollama_chat/… included)
+# the session policy and the records in view (README, "Reproducing the paper's comparisons")
+session_mode: harness     # harness (NavHarness) | independent (a fresh context-only session per task: observation
+                          #   and action tools only — no files, map, markers, recovery, certification or
+                          #   consolidation; harness.precheck still decides the pre-stop check) | single (the same
+                          #   tool surface, one session across tasks, compacted by the backend when it fills)
+ledger: text              # text | none — earlier tasks' records (ledger, handovers, task files, journal) in the
+                          #   required reading and the file tools; none withholds them (they are still written)
+# fixed-access historical memory (core/harnesses/navh/memory/retrieval.py)
+retrieval: none           # none = the session reads its records itself | bm25 = the harness retrieves them
+                          #   at task start, after a recovery and every retrieval_every_turns turns; the file
+                          #   tools are scoped as under ledger: none, which it implies (off when context-only)
+retrieval_top_k: 5        # bm25: excerpts per retrieval
+retrieval_budget_tokens: 2000   # bm25: tokens one retrieval may add
+retrieval_chunk_tokens: 400     # bm25: chunk length ...
+retrieval_overlap_tokens: 50    # ... and overlap
+retrieval_every_turns: 10       # bm25: turns between scheduled retrievals (no hop runs past the next one)

@@ -1,0 +1,116 @@
+# std_ivlnce_tour_slam_es_lhnav — IR2R-CE (IVLN-CE) val_unseen, all 36 tours, with the onboard SLAM instruments.
+#
+# ONE TOUR IS ONE RUN EPISODE: index i is tour i, its record is the tour's, and the NavHarness chain walks that
+# tour's episodes as its tasks. The body is walked to each next start rather than teleported, and the map, the
+# markers, the LEDGER, the place graph and the house memory all carry across the tour — the long-horizon case
+# the benchmark poses. The mechanism is a task SHAPE (mcp/shapes.py: es.tour) plus this arm saying what one
+# chain is (`surface.navh_bench: tour`); nothing in the runner says index i must be one env episode.
+#
+# Scoring: EmbodiedScore-envs ivlnce (STANDARD body, VLN-CE 3.0 m success — the package's own). The per-episode
+# metrics are the package's, unchanged, and ride in the record as `tour_episodes`; the tour's score is their mean
+# plus t-nDTW, the one number an episode cannot give.
+#
+# Task · env · agent · run are fully specified here (schema: core/config_hint.py). The command line picks the seat:
+# harness=<navh | navhcodex | navhmini> (harness/ beside this file), model=<name> (a row of models/models.yaml with
+# an entry for that harness), effort=<vendor word> its reasoning effort, api=<native | fake> its endpoint (api/).
+# Any other key can be overridden the same way:
+#   python runner.py std_ivlnce_tour_slam_es_lhnav harness=navh model=opus-5
+#   python runner.py std_ivlnce_tour_slam_es_lhnav harness=navhcodex model=gpt-6 effort=medium run.episodes=0-4
+#   python runner.py std_ivlnce_tour_slam_es_lhnav harness=navh model=opus-5 suffix=_s2   # a repeat (seed 2): its own run dir
+
+defaults:
+  - harness: ???  # required: navh | navhcodex | navhmini — harness/<name>.yaml beside this file
+  - models: models  # the models table beside this file, models/models.yaml
+  - api: native  # the endpoint: native (the vendor's) | fake (scripted, no model) — api/<name>.yaml beside this file
+  - _self_
+
+task_key: ivlnce_tour
+env_key: slam_es
+harness_key: ${harness.root}  # the chosen harness's run-name word
+model: ???  # required: a row of models/models.yaml, one with an entry under the chosen harness
+model_key: ${model}  # the chosen model's run-name word
+effort: default  # the vendor's word (Claude low|medium|high|max · OpenAI low|medium|high|xhigh); default = nothing sent
+prefix: std
+suffix: ''  # appended to run.name: a comparison row's runs get a directory of their own
+            # (suffix=_independent), and so does a repeat (suffix=_s2, suffix=_s3 for the second and third seed)
+task:
+  family: tour
+  dataset: ivlnce
+  split: val_unseen
+  episodes: 0-35
+  max_turns: 200
+  max_budget_usd: 60.0
+  rgb_resolution: 512
+  step_budget: 500
+  episode_timeout: 36000   # a whole tour, not one episode
+  tilt_actions: false
+  require:
+  - data/embodiedscore/datasets/ivlnce/tours.json
+env:
+  _target_: exp_workspace.lhnav_es.mcp.env.LhNavEsEnv
+  python: habitat
+  port: 9295
+  env_fields:
+  - instruments
+  slam:  # the SLAM stack's knobs (mcp/stack.py SLAM_KEYS), written out in full
+    cell_size_m: 0.1
+    map_size_m: 48.0
+    max_coarse_steps: 500   # this line's per-episode budget (the package's)
+    frontier_match_m: 1.5
+    start_pitch_deg: 0.0
+    map_mode: v2    # per-floor occupancy layers: unknown / free / obstacle; an obstacle is never
+                    # overwritten by free (depth 0.3-4.5 m; obstacle 0.15-1.4 m above the floor)
+    mapper: {floor_policy: height}  # a new floor layer opens when the estimated height settles
+                    # more than floor_merge_m (1.0 m) from every registered floor
+    render: {}  # render_annotated_map(_v2) kwargs: out_px / margin_m / min_window_m / grid_every_m
+  shapes:
+    tour: exp_workspace.lhnav_es.mcp.shapes.EsTour  # index i = tour i (this arm's own shape)
+    goat: core.shapes.es.EsGoat
+    objnav: core.shapes.es.EsObjNav
+    nav: core.shapes.es.EsNav
+agent:
+  arm:
+    _target_: core.arm.Arm
+    dir: exp_workspace/lhnav_es
+    word: lhnav
+    prompts: prompts.py
+    bare: true
+    instruments: 2
+    toolface: twotool
+    surface:
+      env_prefix: SLAMB
+      navh_bench: tour                 # one chain = one TOUR (its episodes are the chain's tasks)
+      navh_bridge: mcp/navh_bridge.py  # the navh seats' MCP tool surface (each session transport
+                                       # hands its agent a tool process; a tool set belongs to the
+                                       # experiment, so this arm supplies its own)
+      allowed_tools: [observe, step, get_goal, get_pose, get_map, get_trajectory, look_around, mark, preview_path]
+      env_map:
+        SERVER_URL: server_url
+        INSTRUMENTS: instruments
+        STEP_BUDGET: step_budget
+        LIVE_DIR: live_dir
+        FACE: toolface
+        TASK: es_task
+  harness: ${harness}
+  model: ${models[${model}][${harness.root}]}
+  api: ${api}
+run:
+  name: std_ivlnce_tour_slam_es_${harness.root}_${model}_${effort}_lhnav${suffix}
+  dir: outputs/${harness.output_dir}/${run.name}
+  episodes: 0-35   # TOURS, not episodes: all 36 val_unseen tours, every task of each
+  servers: null
+  wp_server: null
+  resume: false
+  dry_run: false
+  budget_usd: null
+  note: null
+  retry: {max_attempts: 6, base_backoff_s: 30.0, max_backoff_s: 300.0}  # rate-limit re-runs (core.retry)
+  server_timeout_s: 900  # a spawned env server: wait for /health this long (cold scene loads)
+  client_timeout_s: 900  # one env verb (place / step / evaluate …) over HTTP
+  callbacks:
+  - _target_: core.callbacks.snapshot.CodeSnapshot
+  - _target_: core.callbacks.jsonl.JsonlLogger
+  - _target_: core.callbacks.raw.RawLogger
+  - _target_: core.callbacks.cost.CostLogger
+  - _target_: core.callbacks.vram.VramSampler
+  - _target_: core.callbacks.stats.StatsReport

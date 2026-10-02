@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+outputs/
+/envs/
+/data
+.claude/memory/
+.omc/
+*.egg-info/
+

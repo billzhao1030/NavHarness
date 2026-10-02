@@ -1,0 +1,117 @@
+# std_goat_slam_es_lhnav — GOAT-Bench val_unseen, all 360 episodes (lifelong multi-object navigation, 5-10
+# sub-goals per episode) with the onboard SLAM instruments. The NavHarness chain runs one task per sub-goal
+# (ledger + judge + recovery ladder) over this arm's env and MCP bridge.
+# Scoring: EmbodiedScore-envs goat (STANDARD body, sub-goal success within 1.0 m of a view point, 5000 steps per
+# episode; habitat's seed-100 episode order).
+#
+# Task · env · agent · run are fully specified here (schema: core/config_hint.py). The command line picks the seat:
+# harness=<navh | navhcodex | navhmini> (harness/ beside this file), model=<name> (a row of models/models.yaml with
+# an entry for that harness), effort=<vendor word> its reasoning effort, api=<native | fake> its endpoint (api/).
+# Any other key can be overridden the same way:
+#   python runner.py std_goat_slam_es_lhnav harness=navh model=opus-5
+#   python runner.py std_goat_slam_es_lhnav harness=navhcodex model=gpt-6 effort=medium run.episodes=0-9
+#   python runner.py std_goat_slam_es_lhnav harness=navhmini model=qwen3.8-27b
+#   python runner.py std_goat_slam_es_lhnav harness=navh model=opus-5 suffix=_s2   # a repeat (seed 2): its own run dir
+# Cross-model judging (both completion checks on another model and core; harness/*.yaml, the model side):
+#   python runner.py std_goat_slam_es_lhnav harness=navhmini model=qwen3.8-27b \
+#       harness.judge_model=claude-opus-5 harness.judge_transport=sdk-session
+#   python runner.py std_goat_slam_es_lhnav harness=navh model=opus-5 \
+#       harness.judge_model=ollama_chat/qwen3.8-27b-q4-std harness.judge_transport=mini-session
+
+defaults:
+  - harness: ???  # required: navh | navhcodex | navhmini — harness/<name>.yaml beside this file
+  - models: models  # the models table beside this file, models/models.yaml
+  - api: native  # the endpoint: native (the vendor's) | fake (scripted, no model) — api/<name>.yaml beside this file
+  - _self_
+
+task_key: goat
+env_key: slam_es
+harness_key: ${harness.root}  # the chosen harness's run-name word
+model: ???  # required: a row of models/models.yaml, one with an entry under the chosen harness
+model_key: ${model}  # the chosen model's run-name word
+effort: default  # the vendor's word (Claude low|medium|high|max · OpenAI low|medium|high|xhigh); default = nothing sent
+prefix: std
+suffix: ''  # appended to run.name: a comparison row's runs get a directory of their own
+            # (suffix=_independent), and so does a repeat (suffix=_s2, suffix=_s3 for the second and third seed)
+task:
+  family: goat
+  dataset: goat
+  split: val_unseen
+  episodes: 0-359
+  max_turns: 1500
+  max_budget_usd: 60.0
+  rgb_resolution: 512
+  step_budget: 5000
+  episode_timeout: 8000
+  max_turns_per_goal: 150
+  episode_timeout_per_goal: 800
+  tilt_actions: false
+  require:
+  - data/embodiedscore/datasets/goat_bench/hm3d/v1/val_unseen/val_unseen.json.gz
+env:
+  _target_: exp_workspace.lhnav_es.mcp.env.LhNavEsEnv
+  python: habitat
+  port: 9275
+  env_fields:
+  - instruments
+  slam:  # the SLAM stack's knobs (mcp/stack.py SLAM_KEYS), written out in full
+    cell_size_m: 0.1
+    map_size_m: 48.0
+    max_coarse_steps: 5000  # GOAT's per-episode budget (the package's), not the 500 of the single-goal lines
+    success_distance: 1.0   # GOAT-Bench's sub-goal success radius, in metres to a view point
+    frontier_match_m: 1.5
+    start_pitch_deg: 0.0
+    map_mode: v2    # per-floor occupancy layers: unknown / free / obstacle; an obstacle is never
+                    # overwritten by free (depth 0.3-4.5 m; obstacle 0.15-1.4 m above the floor)
+    mapper: {floor_policy: height}  # a new floor layer opens when the estimated height settles
+                    # more than floor_merge_m (1.0 m) from every registered floor
+    render: {}  # render_annotated_map(_v2) kwargs: out_px / margin_m / min_window_m / grid_every_m
+  shapes:
+    goat: core.shapes.es.EsGoat
+    objnav: core.shapes.es.EsObjNav
+    nav: core.shapes.es.EsNav
+agent:
+  arm:
+    _target_: core.arm.Arm
+    dir: exp_workspace/lhnav_es
+    word: lhnav
+    prompts: prompts.py
+    bare: true
+    instruments: 2
+    toolface: twotool
+    surface:
+      env_prefix: SLAMB
+      navh_bridge: mcp/navh_bridge.py  # the navh seats' MCP tool surface (each session transport
+                                       # hands its agent a tool process; a tool set belongs to the
+                                       # experiment, so this arm supplies its own)
+      allowed_tools: [observe, step, get_goal, get_pose, get_map, get_trajectory, look_around, mark, preview_path]
+      env_map:
+        SERVER_URL: server_url
+        INSTRUMENTS: instruments
+        STEP_BUDGET: step_budget
+        LIVE_DIR: live_dir
+        FACE: toolface
+        TASK: es_task
+  harness: ${harness}
+  model: ${models[${model}][${harness.root}]}
+  api: ${api}
+run:
+  name: std_goat_slam_es_${harness.root}_${model}_${effort}_lhnav${suffix}
+  dir: outputs/${harness.output_dir}/${run.name}
+  episodes: 0-359
+  servers: null
+  wp_server: null
+  resume: false
+  dry_run: false
+  budget_usd: null
+  note: null
+  retry: {max_attempts: 6, base_backoff_s: 30.0, max_backoff_s: 300.0}  # rate-limit re-runs (core.retry)
+  server_timeout_s: 900  # a spawned env server: wait for /health this long (cold scene loads)
+  client_timeout_s: 900  # one env verb (place / step / evaluate …) over HTTP
+  callbacks:
+  - _target_: core.callbacks.snapshot.CodeSnapshot
+  - _target_: core.callbacks.jsonl.JsonlLogger
+  - _target_: core.callbacks.raw.RawLogger
+  - _target_: core.callbacks.cost.CostLogger
+  - _target_: core.callbacks.vram.VramSampler
+  - _target_: core.callbacks.stats.StatsReport

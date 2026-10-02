@@ -1,0 +1,5 @@
+# api/native — the vendor's own endpoint: Claude Code on its subscription (navh), the Codex CLI on its ChatGPT login
+# (navhcodex), litellm on the provider key (navhmini).
+# This folder is the experiment's Hydra api group: a file beside it picks one with `api=<name>` (defaults: - api: native).
+# Every key here lands beside the model id in agent.model (ModelSpec.extra: api_gateway / gateway_task / gateway_script).
+api_gateway: null

@@ -1,0 +1,7 @@
+# api/fake — the scripted endpoint (core/api/fake_wire.py): the REAL harness (its loop, tool schemas, bridge, records), no model,
+# no tokens. The runner renames the run fakeapi_… (runner.apply_fake_api), so it never mixes with real runs.
+# gateway_script: null = the default walk (observe → step [2, 1, 3] → the task's closing move); api.gateway_script='[["observe",{}],["step",{"actions":[0]}]]'
+# on the command line replaces it.
+api_gateway: fake
+gateway_task: ${task_key}  # picks the closing move (STOP / answer / SUBTASK_STOP)
+gateway_script: null

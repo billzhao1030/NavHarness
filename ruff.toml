@@ -1,0 +1,24 @@
+target-version = "py310"
+line-length = 100
+extend-exclude = [
+    "./thirdparty", "./outputs", "./data",
+    # prompt text and bridge kept in their own formatting — not linted
+    "./core/harnesses/navh/harness", "./core/harnesses/navh/prompts.py", "./core/harnesses/navh/bridge.py",
+]
+
+[lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501", "RUF012"]
+
+[lint.per-file-ignores]
+"**/__init__.py" = ["F401"]   # re-exports
+"exp_workspace/*/nodeset/**/*.py" = ["E402"]   # env/path setup before the simulator imports
+
+[lint.isort]
+required-imports = ["from __future__ import annotations"]
+known-first-party = ["core", "configs", "reporting", "exp_workspace"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

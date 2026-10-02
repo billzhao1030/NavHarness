@@ -1,0 +1,22 @@
+# models/models — the experiment's models table: model -> seat -> the id that seat needs
+# (+ API routing params); an absent seat = that model cannot sit there. Every experiment file
+# beside this folder loads it (defaults: - models: models) and picks one row with `model=<name>`
+# on the command line (agent.model = ${models[${model}][${harness.root}]}).
+# A row's key is the run-name segment.
+#
+# navh  — Claude Code holds the session: the bare Claude id the Agent SDK takes (subscription).
+# navhcodex — the Codex CLI holds it: codex's own model slug (ChatGPT login).
+# navhmini  — mini-swe-agent is the core: a litellm id (ollama_chat/… local, openai/… + api_base),
+#             billed through the provider key.
+# A judge on another core (harness.judge_model + harness.judge_transport) is named by the id in that
+# core's column: claude-opus-5 on sdk-session, ollama_chat/qwen3.8-27b-q4-std on mini-session.
+
+# The paper's four reasoning cores, each on the session it uses there.
+opus-5:
+  navh: {id: claude-opus-5}
+gpt-6:
+  navhcodex: {id: gpt-6-astra}          # GPT-6 Astra, the Codex CLI's slug; the paper runs it with effort=medium
+gpt-4o:
+  navhmini: {id: gpt-4o}
+qwen3.8-27b:
+  navhmini: {id: ollama_chat/qwen3.8-27b-q4-std}   # a local Ollama tag: qwen3.8:27b-q4_K_M with seed 42 (README, step 5)
